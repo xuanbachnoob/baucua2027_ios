@@ -51,7 +51,10 @@ jobs:
           CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
 
-          echo -n "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          echo "Certificate file size:"
+          ls -lh "$CERTIFICATE_PATH"
 
           security create-keychain \
             -p "github-actions" \
@@ -91,27 +94,40 @@ jobs:
         run: |
           PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
 
-          echo -n "$PROVISIONING_PROFILE_BASE64" \
-            | base64 --decode \
-            > "$PROFILE_PATH"
+          printf '%s' "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
 
-          mkdir -p \
-            "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "Provisioning profile file size:"
+          ls -lh "$PROFILE_PATH"
+
+          if [ ! -s "$PROFILE_PATH" ]; then
+            echo "Provisioning profile is empty."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
 
           PROFILE_UUID=$(
-            security cms -D -i "$PROFILE_PATH" \
-            | /usr/libexec/PlistBuddy \
-            -c "Print UUID" /dev/stdin
+            /usr/libexec/PlistBuddy \
+              -c "Print :UUID" \
+              "$RUNNER_TEMP/profile.plist"
           )
+
+          PROFILE_NAME=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Name" \
+              "$RUNNER_TEMP/profile.plist"
+          )
+
+          echo "Profile name: $PROFILE_NAME"
+          echo "Profile UUID: $PROFILE_UUID"
 
           cp "$PROFILE_PATH" \
             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
-          echo "Provisioning Profile installed:"
-          echo "$PROFILE_UUID"
-
       # ==========================================
-      # 7. Show signing identities
+      # 7. Check signing identities
       # ==========================================
       - name: Check signing identities
         run: |
@@ -128,7 +144,24 @@ jobs:
             --build-number=1
 
       # ==========================================
-      # 9. Save IPA as GitHub artifact
+      # 9. Check generated IPA
+      # ==========================================
+      - name: Check IPA
+        run: |
+          echo "IPA files:"
+          find build/ios/ipa -type f -name "*.ipa" -print
+
+          IPA_PATH=$(find build/ios/ipa -type f -name "*.ipa" | head -1)
+
+          if [ -z "$IPA_PATH" ]; then
+            echo "No IPA was generated."
+            exit 1
+          fi
+
+          ls -lh "$IPA_PATH"
+
+      # ==========================================
+      # 10. Save IPA as GitHub artifact
       # ==========================================
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
@@ -138,7 +171,7 @@ jobs:
           if-no-files-found: error
 
       # ==========================================
-      # 10. Prepare App Store Connect API Key
+      # 11. Prepare App Store Connect API Key
       # ==========================================
       - name: Prepare App Store Connect API Key
         env:
@@ -147,31 +180,30 @@ jobs:
         run: |
           mkdir -p "$HOME/.appstoreconnect/private_keys"
 
-          printf '%s' "$ASC_PRIVATE_KEY" \
-            > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
-          chmod 600 \
-            "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$KEY_PATH"
+
+          chmod 600 "$KEY_PATH"
+
+          echo "App Store Connect API key prepared."
 
       # ==========================================
-      # 11. Upload IPA to App Store Connect
+      # 12. Upload IPA to App Store Connect
       # ==========================================
       - name: Upload to App Store Connect
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          IPA_PATH=$(find build/ios/ipa \
-            -type f \
-            -name "*.ipa" \
-            | head -1)
+          IPA_PATH=$(find build/ios/ipa -type f -name "*.ipa" | head -1)
 
           if [ -z "$IPA_PATH" ]; then
             echo "IPA file not found."
             exit 1
           fi
 
-          echo "Uploading:"
+          echo "Uploading IPA:"
           echo "$IPA_PATH"
 
           xcrun altool \
