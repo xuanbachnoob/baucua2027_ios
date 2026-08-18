@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v5
 
       # ============================================================
-      # 2. Check Xcode / iOS SDK
+      # 2. Check Xcode
       # ============================================================
       - name: Check Xcode
         run: |
@@ -35,13 +35,15 @@ jobs:
           cache: true
 
       - name: Flutter version
-        run: flutter --version
+        run: |
+          flutter --version
 
       # ============================================================
       # 4. Install Flutter dependencies
       # ============================================================
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Install Flutter dependencies
+        run: |
+          flutter pub get
 
       # ============================================================
       # 5. Install Apple Distribution Certificate
@@ -59,7 +61,12 @@ jobs:
             | base64 --decode \
             > "$CERTIFICATE_PATH"
 
-          echo "Certificate size:"
+          if [ ! -s "$CERTIFICATE_PATH" ]; then
+            echo "ERROR: Certificate is empty."
+            exit 1
+          fi
+
+          echo "Certificate:"
           ls -lh "$CERTIFICATE_PATH"
 
           security create-keychain \
@@ -114,7 +121,7 @@ jobs:
             > "$PROFILE_PATH"
 
           if [ ! -s "$PROFILE_PATH" ]; then
-            echo "ERROR: Provisioning Profile is empty."
+            echo "ERROR: Provisioning profile is empty."
             exit 1
           fi
 
@@ -147,32 +154,50 @@ jobs:
               "$PROFILE_PLIST"
           )
 
-          echo "===== PROFILE ====="
+          echo "===== PROVISIONING PROFILE ====="
           echo "Name: $PROFILE_NAME"
           echo "UUID: $PROFILE_UUID"
           echo "Team: $PROFILE_TEAM"
           echo "App ID: $PROFILE_APP_ID"
 
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          if [ "$PROFILE_NAME" != "BauCua2027_AppStore" ]; then
+            echo "ERROR: Unexpected provisioning profile."
+            exit 1
+          fi
+
+          if [ "$PROFILE_TEAM" != "944TH6UDAS" ]; then
+            echo "ERROR: Provisioning profile Team ID does not match."
+            exit 1
+          fi
+
+          mkdir -p \
+            "$HOME/Library/MobileDevice/Provisioning Profiles"
 
           cp "$PROFILE_PATH" \
             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
       # ============================================================
-      # 7. Verify signing identity
+      # 7. Verify Distribution Certificate
       # ============================================================
       - name: Check signing identities
         run: |
-          security find-identity -v -p codesigning
+          echo "===== SIGNING IDENTITIES ====="
 
-          if ! security find-identity -v -p codesigning \
+          security find-identity \
+            -v \
+            -p codesigning
+
+          if ! security find-identity \
+            -v \
+            -p codesigning \
             | grep -q "Apple Distribution"; then
+
             echo "ERROR: Apple Distribution certificate not found."
             exit 1
           fi
 
       # ============================================================
-      # 8. Prepare Flutter iOS files WITHOUT signing
+      # 8. Prepare Flutter project
       # ============================================================
       - name: Prepare Flutter iOS Build
         run: |
@@ -183,88 +208,203 @@ jobs:
             --build-number=1
 
       # ============================================================
-      # 9. Configure ONLY Runner target for manual signing
+      # 9. Configure signing ONLY on Runner target configurations
       # ============================================================
-      - name: Configure Runner signing
+      - name: Configure Runner Signing
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           path = Path("ios/Runner.xcodeproj/project.pbxproj")
           text = path.read_text()
 
-          bundle_id = "com.baucua2027ios.game"
-          team_id = "944TH6UDAS"
-          profile = "BauCua2027_AppStore"
+          TEAM = "944TH6UDAS"
+          PROFILE = "BauCua2027_AppStore"
 
-          # Add / replace DEVELOPMENT_TEAM on Runner build configs
-          text = re.sub(
-              r'DEVELOPMENT_TEAM = [A-Z0-9]+;',
-              f'DEVELOPMENT_TEAM = {team_id};',
-              text
+          # These IDs come directly from this Flutter project's
+          # PBXNativeTarget "Runner" configuration list.
+          runner_configs = {
+              "97C147061CF9000F007C117D": "Debug",
+              "97C147071CF9000F007C117D": "Release",
+              "249021D4217E4FDB00AE95B9": "Profile",
+          }
+
+          def patch_configuration(text, config_id, config_name):
+              marker = f'{config_id} /* {config_name} */ = {{'
+
+              start = text.find(marker)
+
+              if start == -1:
+                  raise RuntimeError(
+                      f"Runner {config_name} configuration not found"
+                  )
+
+              build_settings_start = text.find(
+                  "buildSettings = {",
+                  start
+              )
+
+              if build_settings_start == -1:
+                  raise RuntimeError(
+                      f"buildSettings not found for Runner {config_name}"
+                  )
+
+              block_end = text.find(
+                  "\n\t\t\t};",
+                  build_settings_start
+              )
+
+              if block_end == -1:
+                  raise RuntimeError(
+                      f"End of buildSettings not found for Runner {config_name}"
+                  )
+
+              block = text[
+                  build_settings_start:block_end
+              ]
+
+              # Only patch the real Runner target.
+              if (
+                  "PRODUCT_BUNDLE_IDENTIFIER = "
+                  "com.baucua2027ios.game;"
+                  not in block
+              ):
+                  raise RuntimeError(
+                      f"{config_name} is not Runner app configuration"
+                  )
+
+              # Remove old signing settings from this Runner block.
+              filtered = []
+
+              for line in block.splitlines():
+                  stripped = line.strip()
+
+                  if stripped.startswith("CODE_SIGN_STYLE ="):
+                      continue
+
+                  if stripped.startswith("CODE_SIGN_IDENTITY ="):
+                      continue
+
+                  if stripped.startswith(
+                      '"CODE_SIGN_IDENTITY[sdk=iphoneos*]"'
+                  ):
+                      continue
+
+                  if stripped.startswith("DEVELOPMENT_TEAM ="):
+                      continue
+
+                  if stripped.startswith(
+                      "PROVISIONING_PROFILE_SPECIFIER ="
+                  ):
+                      continue
+
+                  if stripped.startswith("PROVISIONING_PROFILE ="):
+                      continue
+
+                  filtered.append(line)
+
+              # Insert signing settings immediately after
+              # buildSettings = {
+              new_block = "\n".join(filtered)
+
+              insertion = (
+                  "\n"
+                  "\t\t\t\tCODE_SIGN_IDENTITY = "
+                  '"Apple Distribution";\n'
+                  "\t\t\t\tCODE_SIGN_STYLE = Manual;\n"
+                  f"\t\t\t\tDEVELOPMENT_TEAM = {TEAM};\n"
+                  "\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "
+                  f'"{PROFILE}";'
+              )
+
+              new_block = new_block.replace(
+                  "buildSettings = {",
+                  "buildSettings = {" + insertion,
+                  1
+              )
+
+              return (
+                  text[:build_settings_start]
+                  + new_block
+                  + text[block_end:]
+              )
+
+          # Release is what Archive uses.
+          text = patch_configuration(
+              text,
+              runner_configs["97C147071CF9000F007C117D"]
+              if False else "97C147071CF9000F007C117D",
+              "Release"
           )
 
-          # Change Runner signing style to Manual
-          text = text.replace(
-              'CODE_SIGN_STYLE = Automatic;',
-              'CODE_SIGN_STYLE = Manual;'
+          # Profile is also configured for consistency.
+          text = patch_configuration(
+              text,
+              "249021D4217E4FDB00AE95B9",
+              "Profile"
           )
 
-          # Ensure Runner configs have provisioning profile
-          lines = text.splitlines()
-          result = []
-          in_build_settings = False
-          runner_bundle_seen = False
+          path.write_text(text)
 
-          for line in lines:
-              stripped = line.strip()
-
-              if stripped == 'buildSettings = {':
-                  in_build_settings = True
-                  runner_bundle_seen = False
-
-              if in_build_settings and \
-                 f'PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};' in stripped:
-                  runner_bundle_seen = True
-
-              if in_build_settings and stripped == '};':
-                  if runner_bundle_seen:
-                      indent = line[:len(line) - len(line.lstrip())]
-
-                      block = "\n".join(result[-40:])
-
-                      if "PROVISIONING_PROFILE_SPECIFIER" not in block:
-                          result.append(
-                              f'{indent}\tPROVISIONING_PROFILE_SPECIFIER = "{profile}";'
-                          )
-
-                      if "CODE_SIGN_IDENTITY" not in block:
-                          result.append(
-                              f'{indent}\tCODE_SIGN_IDENTITY = "Apple Distribution";'
-                          )
-
-                  in_build_settings = False
-                  runner_bundle_seen = False
-
-              result.append(line)
-
-          path.write_text("\n".join(result) + "\n")
+          print("Runner Release/Profile signing configured.")
           PY
 
-          echo "===== RUNNER SIGNING SETTINGS ====="
-          grep -n \
-            "PRODUCT_BUNDLE_IDENTIFIER\|DEVELOPMENT_TEAM\|CODE_SIGN_STYLE\|CODE_SIGN_IDENTITY\|PROVISIONING_PROFILE_SPECIFIER" \
-            ios/Runner.xcodeproj/project.pbxproj
+      # ============================================================
+      # 10. Verify Runner signing configuration
+      # ============================================================
+      - name: Verify Runner Signing
+        run: |
+          echo "===== RUNNER RELEASE BUILD SETTINGS ====="
+
+          xcodebuild \
+            -project ios/Runner.xcodeproj \
+            -target Runner \
+            -configuration Release \
+            -showBuildSettings \
+            | grep -E \
+            "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER"
+
+          echo "===== CHECK REQUIRED VALUES ====="
+
+          SETTINGS=$(
+            xcodebuild \
+              -project ios/Runner.xcodeproj \
+              -target Runner \
+              -configuration Release \
+              -showBuildSettings
+          )
+
+          echo "$SETTINGS" \
+            | grep -q \
+            "PRODUCT_BUNDLE_IDENTIFIER = com.baucua2027ios.game"
+
+          echo "$SETTINGS" \
+            | grep -q \
+            "DEVELOPMENT_TEAM = 944TH6UDAS"
+
+          echo "$SETTINGS" \
+            | grep -q \
+            "CODE_SIGN_STYLE = Manual"
+
+          echo "$SETTINGS" \
+            | grep -q \
+            "PROVISIONING_PROFILE_SPECIFIER = BauCua2027_AppStore"
+
+          echo "Runner signing configuration is valid."
 
       # ============================================================
-      # 10. Archive
+      # 11. Archive iOS application
+      #
       # IMPORTANT:
-      # Do NOT pass provisioning profile globally here.
+      # No signing settings are passed globally here.
+      # Firebase / gRPC / other packages will therefore NOT receive
+      # Runner's provisioning profile.
       # ============================================================
       - name: Archive iOS App
         run: |
           ARCHIVE_PATH="$RUNNER_TEMP/BauCua2027.xcarchive"
+
+          echo "===== ARCHIVING ====="
 
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
@@ -278,17 +418,23 @@ jobs:
             clean archive
 
           echo "===== ARCHIVE CREATED ====="
+
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "ERROR: Archive was not created."
+            exit 1
+          fi
+
           ls -lah "$ARCHIVE_PATH"
 
       # ============================================================
-      # 11. Create ExportOptions.plist
+      # 12. Create ExportOptions.plist
       # ============================================================
       - name: Create Export Options
         run: |
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
 
@@ -323,10 +469,11 @@ jobs:
           </plist>
           EOF
 
+          echo "===== EXPORT OPTIONS ====="
           cat "$RUNNER_TEMP/ExportOptions.plist"
 
       # ============================================================
-      # 12. Export IPA
+      # 13. Export IPA
       # ============================================================
       - name: Export IPA
         run: |
@@ -342,10 +489,14 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
           echo "===== EXPORTED FILES ====="
-          find "$EXPORT_PATH" -maxdepth 2 -type f -print
+
+          find "$EXPORT_PATH" \
+            -maxdepth 2 \
+            -type f \
+            -print
 
       # ============================================================
-      # 13. Copy IPA
+      # 14. Find IPA
       # ============================================================
       - name: Check IPA
         run: |
@@ -357,7 +508,7 @@ jobs:
           )
 
           if [ -z "$IPA_PATH" ]; then
-            echo "ERROR: IPA file was not generated."
+            echo "ERROR: IPA was not generated."
             exit 1
           fi
 
@@ -366,11 +517,11 @@ jobs:
           cp "$IPA_PATH" \
             build/ios/ipa/BauCua2027.ipa
 
-          echo "===== IPA ====="
+          echo "===== IPA GENERATED ====="
           ls -lh build/ios/ipa/BauCua2027.ipa
 
       # ============================================================
-      # 14. Save IPA artifact
+      # 15. Save IPA as GitHub Artifact
       # ============================================================
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
@@ -380,28 +531,32 @@ jobs:
           if-no-files-found: error
 
       # ============================================================
-      # 15. Prepare App Store Connect API key
+      # 16. Prepare App Store Connect API Key
       # ============================================================
       - name: Prepare App Store Connect API Key
         env:
           ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         run: |
-          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          mkdir -p \
+            "$HOME/.appstoreconnect/private_keys"
 
           KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
-          printf '%s' "$ASC_PRIVATE_KEY" > "$KEY_PATH"
+          printf '%s' "$ASC_PRIVATE_KEY" \
+            > "$KEY_PATH"
 
           chmod 600 "$KEY_PATH"
 
           if [ ! -s "$KEY_PATH" ]; then
-            echo "ERROR: API key is empty."
+            echo "ERROR: App Store Connect API key is empty."
             exit 1
           fi
 
+          echo "App Store Connect API key prepared."
+
       # ============================================================
-      # 16. Upload to App Store Connect / TestFlight
+      # 17. Upload to App Store Connect / TestFlight
       # ============================================================
       - name: Upload to App Store Connect
         env:
@@ -409,6 +564,13 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           IPA_PATH="build/ios/ipa/BauCua2027.ipa"
+
+          if [ ! -f "$IPA_PATH" ]; then
+            echo "ERROR: IPA not found."
+            exit 1
+          fi
+
+          echo "===== UPLOADING TO APP STORE CONNECT ====="
 
           xcrun altool \
             --upload-app \
