@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "304108838218",
+    "project_id": "baucua2027-ios",
+    "storage_bucket": "baucua2027-ios.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:304108838218:android:d618c99a094cfc8ceb35b3",
+        "android_client_info": {
+          "package_name": "com.baucua2027ios.game"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCKvmHoA-GkB-CB4G5-PY_ks_6C0fFS8SE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

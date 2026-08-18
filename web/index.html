@@ -1,0 +1,126 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Chơi Bầu Cua trực tiếp trên web, tối ưu cho điện thoại.">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bầu Cua">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>Bầu Cua</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #790000;
+    }
+
+    #app-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: #fff2b8;
+      font-family: Arial, Helvetica, sans-serif;
+      text-align: center;
+      background:
+        radial-gradient(circle at 50% 18%, rgba(255, 222, 93, 0.34), transparent 27%),
+        radial-gradient(circle at 50% 58%, rgba(255, 56, 37, 0.36), transparent 36%),
+        linear-gradient(180deg, #e51c14 0%, #a00000 55%, #4c0000 100%);
+      transition: opacity 240ms ease, visibility 240ms ease;
+    }
+
+    #app-loading.is-hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .loading-card {
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+    }
+
+    .loading-logo {
+      color: #ffd84d;
+      font-size: clamp(36px, 10vw, 62px);
+      font-weight: 900;
+      line-height: 0.95;
+      text-shadow: 0 4px 0 #7a0000, 0 8px 18px rgba(0, 0, 0, 0.42);
+    }
+
+    .loading-dice {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      background: #fff7dc;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.34), inset 0 -5px 0 rgba(126, 0, 0, 0.18);
+      animation: loading-roll 920ms ease-in-out infinite alternate;
+    }
+
+    .loading-dice::before {
+      content: "";
+      display: block;
+      width: 13px;
+      height: 13px;
+      margin: 20px auto;
+      border-radius: 999px;
+      background: #d71920;
+      box-shadow: -17px -12px 0 #f6c02d, 17px 12px 0 #7fc241;
+    }
+
+    .loading-text {
+      display: grid;
+      gap: 5px;
+      color: #fff3b0;
+      font-size: 17px;
+      font-weight: 800;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+
+    .loading-text span {
+      color: #ffe8a0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    @keyframes loading-roll {
+      from { transform: translateY(0) rotate(-8deg); }
+      to { transform: translateY(-8px) rotate(10deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app-loading" aria-live="polite">
+    <div class="loading-card">
+      <div class="loading-logo">Bầu Cua</div>
+      <div class="loading-dice" aria-hidden="true"></div>
+      <div class="loading-text">
+        Đang tải Bầu Cua
+        <span>Vui lòng chờ vài giây...</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener("flutter-first-frame", function () {
+      document.getElementById("app-loading")?.classList.add("is-hidden");
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
