@@ -12,7 +12,7 @@ jobs:
       # 1. Checkout source
       # ==========================================
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ==========================================
       # 2. Check Xcode / iOS SDK
