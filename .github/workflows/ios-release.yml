@@ -8,23 +8,26 @@ jobs:
     runs-on: macos-26
 
     steps:
-      # ==========================================
+      # ============================================================
       # 1. Checkout source
-      # ==========================================
+      # ============================================================
       - name: Checkout source
         uses: actions/checkout@v5
 
-      # ==========================================
+      # ============================================================
       # 2. Check Xcode / iOS SDK
-      # ==========================================
+      # ============================================================
       - name: Check Xcode
         run: |
+          echo "===== XCODE ====="
           xcodebuild -version
+
+          echo "===== IOS SDK ====="
           xcrun --sdk iphoneos --show-sdk-version
 
-      # ==========================================
+      # ============================================================
       # 3. Setup Flutter
-      # ==========================================
+      # ============================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -34,15 +37,15 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      # ==========================================
+      # ============================================================
       # 4. Install Flutter dependencies
-      # ==========================================
+      # ============================================================
       - name: Install dependencies
         run: flutter pub get
 
-      # ==========================================
+      # ============================================================
       # 5. Install Apple Distribution Certificate
-      # ==========================================
+      # ============================================================
       - name: Install Apple Distribution Certificate
         env:
           CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
@@ -50,14 +53,17 @@ jobs:
         run: |
           CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="github-actions"
 
-          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$CERTIFICATE_BASE64" \
+            | base64 --decode \
+            > "$CERTIFICATE_PATH"
 
-          echo "Certificate file size:"
+          echo "Certificate size:"
           ls -lh "$CERTIFICATE_PATH"
 
           security create-keychain \
-            -p "github-actions" \
+            -p "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
           security set-keychain-settings \
@@ -65,7 +71,7 @@ jobs:
             "$KEYCHAIN_PATH"
 
           security unlock-keychain \
-            -p "github-actions" \
+            -p "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
           security import "$CERTIFICATE_PATH" \
@@ -75,104 +81,276 @@ jobs:
             -f pkcs12 \
             -k "$KEYCHAIN_PATH"
 
-          security list-keychain \
-            -d user \
-            -s "$KEYCHAIN_PATH"
-
           security set-key-partition-list \
-            -S apple-tool:,apple: \
+            -S apple-tool:,apple:,codesign: \
             -s \
-            -k "github-actions" \
+            -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
-      # ==========================================
-      # 6. Install Provisioning Profile
-      # ==========================================
+          security list-keychains \
+            -d user \
+            -s "$KEYCHAIN_PATH" \
+            "$HOME/Library/Keychains/login.keychain-db"
+
+          security default-keychain \
+            -s "$KEYCHAIN_PATH"
+
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+      # ============================================================
+      # 6. Install App Store Provisioning Profile
+      # ============================================================
       - name: Install Provisioning Profile
         env:
           PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
-          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          PROFILE_PATH="$RUNNER_TEMP/BauCua2027_AppStore.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
 
-          printf '%s' "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
-
-          echo "Provisioning profile file size:"
-          ls -lh "$PROFILE_PATH"
+          printf '%s' "$PROVISIONING_PROFILE_BASE64" \
+            | base64 --decode \
+            > "$PROFILE_PATH"
 
           if [ ! -s "$PROFILE_PATH" ]; then
-            echo "Provisioning profile is empty."
+            echo "ERROR: Provisioning Profile is empty."
             exit 1
           fi
 
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "Provisioning Profile size:"
+          ls -lh "$PROFILE_PATH"
 
-          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          security cms \
+            -D \
+            -i "$PROFILE_PATH" \
+            > "$PROFILE_PLIST"
 
           PROFILE_UUID=$(
             /usr/libexec/PlistBuddy \
               -c "Print :UUID" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
           )
 
           PROFILE_NAME=$(
             /usr/libexec/PlistBuddy \
               -c "Print :Name" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
           )
 
-          echo "Profile name: $PROFILE_NAME"
-          echo "Profile UUID: $PROFILE_UUID"
+          PROFILE_TEAM=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :TeamIdentifier:0" \
+              "$PROFILE_PLIST"
+          )
+
+          PROFILE_APP_ID=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:application-identifier" \
+              "$PROFILE_PLIST"
+          )
+
+          echo "===== PROFILE INFORMATION ====="
+          echo "Name: $PROFILE_NAME"
+          echo "UUID: $PROFILE_UUID"
+          echo "Team: $PROFILE_TEAM"
+          echo "App ID: $PROFILE_APP_ID"
+
+          mkdir -p \
+            "$HOME/Library/MobileDevice/Provisioning Profiles"
 
           cp "$PROFILE_PATH" \
             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
-      # ==========================================
-      # 7. Check signing identities
-      # ==========================================
+      # ============================================================
+      # 7. Verify signing identity
+      # ============================================================
       - name: Check signing identities
         run: |
+          echo "===== SIGNING IDENTITIES ====="
           security find-identity -v -p codesigning
 
-      # ==========================================
-      # 8. Build signed IPA
-      # ==========================================
-      - name: Build IPA
-        run: |
-          flutter build ipa \
-            --release \
-            --build-name=1.0.0 \
-            --build-number=1
-
-      # ==========================================
-      # 9. Check generated IPA
-      # ==========================================
-      - name: Check IPA
-        run: |
-          echo "IPA files:"
-          find build/ios/ipa -type f -name "*.ipa" -print
-
-          IPA_PATH=$(find build/ios/ipa -type f -name "*.ipa" | head -1)
-
-          if [ -z "$IPA_PATH" ]; then
-            echo "No IPA was generated."
+          if ! security find-identity -v -p codesigning \
+            | grep -q "Apple Distribution"; then
+            echo "ERROR: Apple Distribution certificate not found."
             exit 1
           fi
 
+      # ============================================================
+      # 8. Check Bundle ID
+      # ============================================================
+      - name: Check Bundle ID
+        run: |
+          echo "===== BUNDLE ID ====="
+
+          grep -n \
+            "PRODUCT_BUNDLE_IDENTIFIER = com.baucua2027ios.game;" \
+            ios/Runner.xcodeproj/project.pbxproj \
+            || {
+              echo "ERROR: Expected Bundle ID not found."
+              exit 1
+            }
+
+      # ============================================================
+      # 9. Prepare Flutter iOS build WITHOUT signing
+      # ============================================================
+      - name: Prepare Flutter iOS Build
+        run: |
+          flutter build ios \
+            --release \
+            --no-codesign \
+            --build-name=1.0.0 \
+            --build-number=1
+
+      # ============================================================
+      # 10. Install CocoaPods if required
+      # ============================================================
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+
+          if [ -f "Podfile" ]; then
+            pod install --repo-update
+          else
+            echo "No Podfile found. Skipping CocoaPods."
+          fi
+
+          cd ..
+
+      # ============================================================
+      # 11. Archive using MANUAL App Store signing
+      # ============================================================
+      - name: Archive iOS App
+        run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/BauCua2027.xcarchive"
+
+          echo "===== ARCHIVING ====="
+
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            DEVELOPMENT_TEAM=944TH6UDAS \
+            PRODUCT_BUNDLE_IDENTIFIER=com.baucua2027ios.game \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="BauCua2027_AppStore" \
+            CURRENT_PROJECT_VERSION=1 \
+            MARKETING_VERSION=1.0.0 \
+            clean archive
+
+          echo "===== ARCHIVE CREATED ====="
+          ls -lah "$ARCHIVE_PATH"
+
+      # ============================================================
+      # 12. Create ExportOptions.plist
+      # ============================================================
+      - name: Create Export Options
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+
+              <key>method</key>
+              <string>app-store-connect</string>
+
+              <key>destination</key>
+              <string>export</string>
+
+              <key>signingStyle</key>
+              <string>manual</string>
+
+              <key>teamID</key>
+              <string>944TH6UDAS</string>
+
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.baucua2027ios.game</key>
+                  <string>BauCua2027_AppStore</string>
+              </dict>
+
+              <key>stripSwiftSymbols</key>
+              <true/>
+
+              <key>uploadSymbols</key>
+              <true/>
+
+          </dict>
+          </plist>
+          EOF
+
+          echo "===== EXPORT OPTIONS ====="
+          cat "$RUNNER_TEMP/ExportOptions.plist"
+
+      # ============================================================
+      # 13. Export IPA
+      # ============================================================
+      - name: Export IPA
+        run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/BauCua2027.xcarchive"
+          EXPORT_PATH="$RUNNER_TEMP/BauCua2027Export"
+
+          mkdir -p "$EXPORT_PATH"
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+          echo "===== EXPORTED FILES ====="
+          find "$EXPORT_PATH" \
+            -maxdepth 2 \
+            -type f \
+            -print
+
+      # ============================================================
+      # 14. Find and verify IPA
+      # ============================================================
+      - name: Check IPA
+        run: |
+          IPA_PATH=$(
+            find "$RUNNER_TEMP/BauCua2027Export" \
+              -type f \
+              -name "*.ipa" \
+              | head -1
+          )
+
+          if [ -z "$IPA_PATH" ]; then
+            echo "ERROR: IPA file was not generated."
+            exit 1
+          fi
+
+          echo "===== IPA GENERATED ====="
+          echo "$IPA_PATH"
           ls -lh "$IPA_PATH"
 
-      # ==========================================
-      # 10. Save IPA as GitHub artifact
-      # ==========================================
+          mkdir -p build/ios/ipa
+
+          cp "$IPA_PATH" \
+            build/ios/ipa/BauCua2027.ipa
+
+      # ============================================================
+      # 15. Save IPA to GitHub artifact
+      # ============================================================
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: BauCua2027-iOS
-          path: build/ios/ipa/*.ipa
+          path: build/ios/ipa/BauCua2027.ipa
           if-no-files-found: error
 
-      # ==========================================
-      # 11. Prepare App Store Connect API Key
-      # ==========================================
+      # ============================================================
+      # 16. Prepare App Store Connect API Key
+      # ============================================================
       - name: Prepare App Store Connect API Key
         env:
           ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -180,30 +358,31 @@ jobs:
         run: |
           mkdir -p "$HOME/.appstoreconnect/private_keys"
 
-          KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          API_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
-          printf '%s' "$ASC_PRIVATE_KEY" > "$KEY_PATH"
+          printf '%s' "$ASC_PRIVATE_KEY" \
+            > "$API_KEY_PATH"
 
-          chmod 600 "$KEY_PATH"
+          chmod 600 "$API_KEY_PATH"
+
+          if [ ! -s "$API_KEY_PATH" ]; then
+            echo "ERROR: App Store Connect API key is empty."
+            exit 1
+          fi
 
           echo "App Store Connect API key prepared."
 
-      # ==========================================
-      # 12. Upload IPA to App Store Connect
-      # ==========================================
+      # ============================================================
+      # 17. Upload IPA to App Store Connect / TestFlight
+      # ============================================================
       - name: Upload to App Store Connect
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          IPA_PATH=$(find build/ios/ipa -type f -name "*.ipa" | head -1)
+          IPA_PATH="build/ios/ipa/BauCua2027.ipa"
 
-          if [ -z "$IPA_PATH" ]; then
-            echo "IPA file not found."
-            exit 1
-          fi
-
-          echo "Uploading IPA:"
+          echo "===== UPLOADING TO APP STORE CONNECT ====="
           echo "$IPA_PATH"
 
           xcrun altool \
@@ -212,3 +391,5 @@ jobs:
             -t ios \
             --apiKey "$ASC_KEY_ID" \
             --apiIssuer "$ASC_ISSUER_ID"
+
+          echo "===== UPLOAD FINISHED ====="
