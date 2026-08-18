@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' as io;
 import 'dart:math';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -216,6 +217,31 @@ class _BauCuaGameState extends State<BauCuaGame>
     } finally {
       await SystemNavigator.pop();
     }
+  }
+
+  Future<void> _quitApp() async {
+    if (_exitingApp) return;
+    _exitingApp = true;
+    _shakeTimer?.cancel();
+    _clockTimer?.cancel();
+    _activityTimer?.cancel();
+    _connectionGraceTimer?.cancel();
+    await _ruleSubscription?.cancel();
+    _shakeController.stop();
+
+    await Future.wait([
+      _reportOffline()
+          .timeout(const Duration(milliseconds: 800), onTimeout: () {})
+          .catchError((_) {}),
+      _stopBackgroundMusic()
+          .timeout(const Duration(milliseconds: 500), onTimeout: () {})
+          .catchError((_) {}),
+    ]);
+
+    if (io.Platform.isIOS) {
+      io.exit(0);
+    }
+    await SystemNavigator.pop();
   }
 
   Future<void> _initMachine() async {
@@ -624,7 +650,7 @@ class _BauCuaGameState extends State<BauCuaGame>
                 key: const ValueKey('lobby'),
                 assetsReady: _assetsReady,
                 onPlay: _assetsReady ? _startGame : null,
-                onQuit: SystemNavigator.pop,
+                onQuit: () => unawaited(_quitApp()),
               )
             : TableScreen(
                 key: const ValueKey('table'),
