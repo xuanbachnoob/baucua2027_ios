@@ -99,10 +99,9 @@ class _BauCuaGameState extends State<BauCuaGame>
 
   late final AnimationController _shakeController;
   late final AudioPlayer _musicPlayer;
-  AudioPool? _diceSoundPool;
+  late final AudioPlayer _dicePlayer;
   bool _musicStartInProgress = false;
   bool _musicDisposeStarted = false;
-  bool _initializingDiceSound = false;
   late List<BauCuaFace> _results;
   List<BauCuaFace>? _shownResults;
   List<BauCuaFace>? _luatConBaseResults;
@@ -144,8 +143,9 @@ class _BauCuaGameState extends State<BauCuaGame>
       duration: const Duration(milliseconds: 180),
     );
     _musicPlayer = AudioPlayer(playerId: 'background_music');
+    _dicePlayer = AudioPlayer(playerId: 'dice_sound');
     unawaited(_configureMusicPlayer());
-    unawaited(_initDiceSoundPool());
+    unawaited(_configureDicePlayer());
     _refreshCheckHack();
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
@@ -177,8 +177,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     unawaited(_reportOffline());
     _shakeController.dispose();
     unawaited(_disposeMusicPlayer());
-    final diceSoundPool = _diceSoundPool;
-    if (diceSoundPool != null) unawaited(_disposeDiceSoundPool(diceSoundPool));
+    unawaited(_disposeDicePlayer());
     super.dispose();
   }
 
@@ -436,52 +435,43 @@ class _BauCuaGameState extends State<BauCuaGame>
   }
 
   void _playDiceSound() {
-    final pool = _diceSoundPool;
-    if (pool == null) {
-      unawaited(_initDiceSoundPool());
-      return;
-    }
-    unawaited(_startDiceSound(pool));
+    unawaited(_startDiceSound());
   }
 
-  Future<void> _startDiceSound(AudioPool pool) async {
+  Future<void> _startDiceSound() async {
     try {
-      await pool.start().timeout(const Duration(seconds: 3));
-    } catch (_) {
-      if (identical(_diceSoundPool, pool)) {
-        _diceSoundPool = null;
-      }
+      await _dicePlayer.stop().timeout(const Duration(milliseconds: 500));
+      await _dicePlayer
+          .play(AssetSource('sound_xucsac.mp3'))
+          .timeout(const Duration(seconds: 3));
+    } on TimeoutException catch (error) {
+      debugPrint('Dice sound start timeout: $error');
+    } catch (error) {
+      debugPrint('Dice sound start failed: $error');
     }
   }
 
-  Future<void> _initDiceSoundPool() async {
-    if (_initializingDiceSound || _diceSoundPool != null) return;
-    _initializingDiceSound = true;
+  Future<void> _configureDicePlayer() async {
     try {
-      final pool = await AudioPool.create(
-        source: AssetSource('sound_xucsac.mp3'),
-        minPlayers: 1,
-        maxPlayers: 2,
-        playerMode: PlayerMode.mediaPlayer,
-        audioContext: AudioContextConfig(
+      await _dicePlayer.setPlayerMode(PlayerMode.lowLatency);
+      await _dicePlayer.setReleaseMode(ReleaseMode.stop);
+      await _dicePlayer.setAudioContext(
+        AudioContextConfig(
+          route: AudioContextConfigRoute.speaker,
           focus: AudioContextConfigFocus.mixWithOthers,
+          respectSilence: false,
         ).build(),
       );
-      if (!mounted) {
-        await pool.dispose();
-        return;
-      }
-      _diceSoundPool = pool;
+    } on TimeoutException catch (error) {
+      debugPrint('Dice sound configuration timeout: $error');
     } catch (error) {
-      debugPrint('Dice sound preload failed: $error');
-    } finally {
-      _initializingDiceSound = false;
+      debugPrint('Dice sound configuration failed: $error');
     }
   }
 
-  Future<void> _disposeDiceSoundPool(AudioPool pool) async {
+  Future<void> _disposeDicePlayer() async {
     try {
-      await pool.dispose();
+      await _dicePlayer.dispose();
     } on TimeoutException catch (error) {
       debugPrint('Dice sound dispose timeout: $error');
     } catch (error) {
@@ -518,7 +508,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     setState(() => _soundEnabled = enabled);
     if (enabled && _view == GameView.table) {
       unawaited(_playBackgroundMusic());
-      unawaited(_initDiceSoundPool());
     } else {
       unawaited(_pauseBackgroundMusic());
     }
