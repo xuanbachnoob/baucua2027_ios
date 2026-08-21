@@ -442,7 +442,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     try {
       await _dicePlayer.stop().timeout(const Duration(milliseconds: 500));
       await _dicePlayer
-          .play(AssetSource('sound_xucsac.mp3'))
+          .play(AssetSource('sound_xucsac.m4a'))
           .timeout(const Duration(seconds: 3));
     } on TimeoutException catch (error) {
       debugPrint('Dice sound start timeout: $error');
@@ -453,11 +453,11 @@ class _BauCuaGameState extends State<BauCuaGame>
 
   Future<void> _configureDicePlayer() async {
     try {
-      await _dicePlayer.setPlayerMode(PlayerMode.lowLatency);
+      await _dicePlayer.setPlayerMode(PlayerMode.mediaPlayer);
       await _dicePlayer.setReleaseMode(ReleaseMode.stop);
       await _dicePlayer.setAudioContext(
         AudioContextConfig(
-          route: AudioContextConfigRoute.speaker,
+          route: AudioContextConfigRoute.system,
           focus: AudioContextConfigFocus.mixWithOthers,
           respectSilence: false,
         ).build(),
