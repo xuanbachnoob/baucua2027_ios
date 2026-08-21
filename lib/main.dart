@@ -116,7 +116,6 @@ class _BauCuaGameState extends State<BauCuaGame>
   RemoteRuleConfig _remoteConfig = RemoteRuleConfig.empty();
   final DateTime _onlineStartedAt = DateTime.now();
   int _shakeCount = 0;
-  bool _remoteReadyForCommand = false;
   String _lastRemoteCommandId = '';
   List<BauCuaFace>? _pendingRemoteResults;
   Timer? _shakeTimer;
@@ -334,8 +333,7 @@ class _BauCuaGameState extends State<BauCuaGame>
 
     if (control.commandId.isEmpty ||
         control.commandId == _lastRemoteCommandId ||
-        !_remoteReadyForCommand ||
-        _cupState != CupState.covered) {
+        _cupState == CupState.opened) {
       return;
     }
 
@@ -521,7 +519,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     setState(() {
       _cupState = CupState.shaking;
       _shakeCount += 1;
-      _remoteReadyForCommand = false;
       _pendingRemoteResults = null;
     });
     unawaited(_reportOnline());
@@ -538,8 +535,8 @@ class _BauCuaGameState extends State<BauCuaGame>
         _shakeController.value = 0;
         setState(() {
           _cupState = CupState.covered;
-          _remoteReadyForCommand = true;
         });
+        _handleRemoteCommand(_remoteConfig.control);
       });
     });
   }
@@ -573,7 +570,6 @@ class _BauCuaGameState extends State<BauCuaGame>
       _luatConBaseResults = _canUseAsLuatConBase(_results)
           ? List<BauCuaFace>.from(_results)
           : null;
-      _remoteReadyForCommand = false;
       _pendingRemoteResults = null;
     });
   }

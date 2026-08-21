@@ -1,6 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
-
 import '../models/rule_config.dart';
 
 class RuleSnapshot {
@@ -41,7 +39,7 @@ RuleSnapshot _snapshotFromDocument(
   final data = snapshot.data();
   return RuleSnapshot(
     config: RemoteRuleConfig.fromMap(data),
-    online: kIsWeb ? data != null : !fromCache,
+    online: data != null,
     fromCache: fromCache,
     hasData: data != null,
     serverUtc: null,
