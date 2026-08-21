@@ -204,8 +204,8 @@ jobs:
           flutter build ios \
             --release \
             --no-codesign \
-            --build-name=1.0.0 \
-            --build-number=3
+            --build-name=1.0.1 \
+            --build-number=4
 
       # ============================================================
       # 9. Configure signing ONLY on Runner target configurations
@@ -413,8 +413,8 @@ jobs:
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -archivePath "$ARCHIVE_PATH" \
-            CURRENT_PROJECT_VERSION=3 \
-            MARKETING_VERSION=1.0.0 \
+            CURRENT_PROJECT_VERSION=4 \
+            MARKETING_VERSION=1.0.1 \
             clean archive
 
           echo "===== ARCHIVE CREATED ====="
