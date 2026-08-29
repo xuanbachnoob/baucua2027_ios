@@ -328,6 +328,7 @@ class _BauCuaGameState extends State<BauCuaGame>
   }
 
   void _scheduleOfflineAfterGrace() {
+    if (_connectionGraceTimer?.isActive == true) return;
     _connectionGraceTimer?.cancel();
     _connectionGraceTimer = Timer(const Duration(seconds: 20), () {
       if (!mounted || !_online) return;
