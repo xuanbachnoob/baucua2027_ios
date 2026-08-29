@@ -12,8 +12,8 @@ class DeviceActivityService {
     required String machineId,
     required DateTime onlineStartedAt,
     required int shakeCount,
-  }) {
-    return _machine(machineId).set({
+  }) async {
+    await _machine(machineId).set({
       'activity': {
         'online': true,
         'onlineStartedAt': Timestamp.fromDate(onlineStartedAt),
@@ -21,6 +21,7 @@ class DeviceActivityService {
         'shakeCount': shakeCount,
       },
     }, SetOptions(merge: true));
+    await _machine(machineId).get(const GetOptions(source: Source.server));
   }
 
   Future<void> reportOffline({

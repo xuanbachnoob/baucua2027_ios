@@ -34,6 +34,10 @@ Future<void> main() async {
         persistenceEnabled: false,
         webExperimentalAutoDetectLongPolling: true,
       );
+    } else {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: false,
+      );
     }
     firebaseReady = true;
   } catch (error) {
@@ -146,7 +150,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     unawaited(_configureMusicPlayer());
     unawaited(_configureDicePlayer());
     _refreshCheckHack();
-    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _refreshCheckHack();
     });
@@ -250,7 +254,7 @@ class _BauCuaGameState extends State<BauCuaGame>
       _startRuleListener(machineId);
       unawaited(_reportOnline());
       _activityTimer?.cancel();
-      _activityTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _activityTimer = Timer.periodic(const Duration(seconds: 10), (_) {
         unawaited(_reportOnline());
       });
     }
@@ -269,6 +273,9 @@ class _BauCuaGameState extends State<BauCuaGame>
       }
     } catch (error) {
       debugPrint('Activity online report failed: $error');
+      if (mounted && _online) {
+        setState(() => _online = false);
+      }
     }
   }
 

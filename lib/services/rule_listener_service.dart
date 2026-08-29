@@ -39,7 +39,7 @@ RuleSnapshot _snapshotFromDocument(
   final data = snapshot.data();
   return RuleSnapshot(
     config: RemoteRuleConfig.fromMap(data),
-    online: data != null,
+    online: !fromCache,
     fromCache: fromCache,
     hasData: data != null,
     serverUtc: null,
