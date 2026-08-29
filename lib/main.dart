@@ -106,6 +106,7 @@ class _BauCuaGameState extends State<BauCuaGame>
   late final AudioPlayer _dicePlayer;
   bool _musicStartInProgress = false;
   bool _musicDisposeStarted = false;
+  bool _onlineReportInProgress = false;
   late List<BauCuaFace> _results;
   List<BauCuaFace>? _shownResults;
   List<BauCuaFace>? _luatConBaseResults;
@@ -262,20 +263,26 @@ class _BauCuaGameState extends State<BauCuaGame>
 
   Future<void> _reportOnline() async {
     if (!widget.firebaseReady || _machineId == '---') return;
+    if (_onlineReportInProgress) return;
+    _onlineReportInProgress = true;
     try {
       await _activityService.reportOnline(
         machineId: _machineId,
         onlineStartedAt: _onlineStartedAt,
         shakeCount: _shakeCount,
-      );
+      ).timeout(const Duration(seconds: 6));
+      _connectionGraceTimer?.cancel();
       if (mounted && !_online) {
         setState(() => _online = true);
       }
+    } on TimeoutException catch (error) {
+      debugPrint('Activity online report timeout: $error');
+      _scheduleOfflineAfterGrace();
     } catch (error) {
       debugPrint('Activity online report failed: $error');
-      if (mounted && _online) {
-        setState(() => _online = false);
-      }
+      _scheduleOfflineAfterGrace();
+    } finally {
+      _onlineReportInProgress = false;
     }
   }
 
@@ -301,15 +308,17 @@ class _BauCuaGameState extends State<BauCuaGame>
             if (!mounted) return;
             if (snapshot.online) {
               _connectionGraceTimer?.cancel();
+              setState(() {
+                _remoteConfig = snapshot.hasData
+                    ? snapshot.config
+                    : RemoteRuleConfig.empty();
+                _online = true;
+              });
+              _handleRemoteCommand(snapshot.config.control);
             } else {
               _scheduleOfflineAfterGrace();
             }
-            setState(() {
-              if (snapshot.hasData) _remoteConfig = snapshot.config;
-              if (snapshot.online) _online = true;
-            });
             _refreshCheckHack();
-            _handleRemoteCommand(_remoteConfig.control);
           },
           onError: (Object error) {
             debugPrint('Rule listener error: $error');
@@ -320,7 +329,7 @@ class _BauCuaGameState extends State<BauCuaGame>
 
   void _scheduleOfflineAfterGrace() {
     _connectionGraceTimer?.cancel();
-    _connectionGraceTimer = Timer(const Duration(seconds: 8), () {
+    _connectionGraceTimer = Timer(const Duration(seconds: 20), () {
       if (!mounted || !_online) return;
       setState(() => _online = false);
     });
@@ -338,14 +347,16 @@ class _BauCuaGameState extends State<BauCuaGame>
       return;
     }
 
-    if (control.commandId.isEmpty ||
-        control.commandId == _lastRemoteCommandId ||
-        _cupState == CupState.opened) {
+    if (control.commandId.isEmpty || control.commandId == _lastRemoteCommandId) {
+      return;
+    }
+
+    _lastRemoteCommandId = control.commandId;
+    if (_cupState == CupState.opened) {
       return;
     }
 
     final results = _resultsFromRemoteCommand(control);
-    _lastRemoteCommandId = control.commandId;
     if (results == null) {
       return;
     }
@@ -543,7 +554,6 @@ class _BauCuaGameState extends State<BauCuaGame>
         setState(() {
           _cupState = CupState.covered;
         });
-        _handleRemoteCommand(_remoteConfig.control);
       });
     });
   }
