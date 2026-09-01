@@ -1,16 +1,19 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'bau_cua_face.dart';
 
 enum CupOpenZone { left, right, bottom }
 
 class LuatConRule {
   const LuatConRule({
-    required this.enabled,
+    required bool enabled,
     required this.allEnabled,
     required this.n,
     required this.ruleId,
     required this.diceOrder,
     required this.selectedCons,
-  });
+    this.expiresAt,
+  }) : _enabled = enabled;
 
   factory LuatConRule.initial() {
     return const LuatConRule(
@@ -45,15 +48,19 @@ class LuatConRule {
         data['selectedCons'] ??
             [data['avoidA'], data['avoidB'], data['avoidC']],
       ),
+      expiresAt: _readDateTime(data['expiresAt']),
     );
   }
 
-  final bool enabled;
+  final bool _enabled;
   final bool allEnabled;
   final int n;
   final int ruleId;
   final List<BauCuaFace> diceOrder;
   final List<BauCuaFace?> selectedCons;
+  final DateTime? expiresAt;
+
+  bool get enabled => _enabled && !_isExpired(expiresAt);
 
   String get formula {
     return switch (ruleId) {
@@ -68,7 +75,11 @@ class LuatConRule {
 }
 
 class LuatCaiRule {
-  const LuatCaiRule({required this.enabled, required this.sets});
+  const LuatCaiRule({
+    required bool enabled,
+    required this.sets,
+    this.expiresAt,
+  }) : _enabled = enabled;
 
   factory LuatCaiRule.initial() {
     return const LuatCaiRule(
@@ -87,11 +98,15 @@ class LuatCaiRule {
     return LuatCaiRule(
       enabled: _readBool(data, ['enabled']),
       sets: _readSets(data['sets'], initial.sets),
+      expiresAt: _readDateTime(data['expiresAt']),
     );
   }
 
-  final bool enabled;
+  final bool _enabled;
   final List<List<BauCuaFace>> sets;
+  final DateTime? expiresAt;
+
+  bool get enabled => _enabled && !_isExpired(expiresAt);
 
   List<BauCuaFace> blockedFor(CupOpenZone zone) {
     final index = switch (zone) {
@@ -192,6 +207,18 @@ int _readInt(Object? value, int fallback) {
   if (value is num) return value.toInt();
   if (value is String) return int.tryParse(value) ?? fallback;
   return fallback;
+}
+
+DateTime? _readDateTime(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  if (value is num) return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+  if (value is String) return DateTime.tryParse(value);
+  return null;
+}
+
+bool _isExpired(DateTime? value) {
+  return value != null && !value.isAfter(DateTime.now());
 }
 
 String _readString(Object? value) {

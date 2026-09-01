@@ -125,7 +125,6 @@ class _BauCuaGameState extends State<BauCuaGame>
   List<BauCuaFace>? _pendingRemoteResults;
   Timer? _shakeTimer;
   Timer? _clockTimer;
-  Timer? _activityTimer;
   Timer? _connectionGraceTimer;
   bool _exitingApp = false;
   bool _assetsReady = false;
@@ -174,7 +173,6 @@ class _BauCuaGameState extends State<BauCuaGame>
   void dispose() {
     _shakeTimer?.cancel();
     _clockTimer?.cancel();
-    _activityTimer?.cancel();
     _connectionGraceTimer?.cancel();
     _ruleSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -203,7 +201,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     _exitingApp = true;
     _shakeTimer?.cancel();
     _clockTimer?.cancel();
-    _activityTimer?.cancel();
     _connectionGraceTimer?.cancel();
     await _ruleSubscription?.cancel();
     _shakeController.stop();
@@ -227,7 +224,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     _exitingApp = true;
     _shakeTimer?.cancel();
     _clockTimer?.cancel();
-    _activityTimer?.cancel();
     _connectionGraceTimer?.cancel();
     await _ruleSubscription?.cancel();
     _shakeController.stop();
@@ -254,10 +250,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     if (widget.firebaseReady) {
       _startRuleListener(machineId);
       unawaited(_reportOnline());
-      _activityTimer?.cancel();
-      _activityTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-        unawaited(_reportOnline());
-      });
     }
   }
 
