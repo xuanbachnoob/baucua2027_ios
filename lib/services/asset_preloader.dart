@@ -18,7 +18,6 @@ class AssetPreloader {
     'assets/volume-level.png',
     'assets/volume-level-mute.png',
     'assets/background.png',
-    'assets/background-vang-cam.png',
     'assets/prop_plate.png',
     'assets/prop_bowl.png',
     'assets/symbol_bau.png',

@@ -32,7 +32,7 @@ void main() {
 
     await tester.pumpWidget(buildButton());
     final gesture = await tester.startGesture(
-      tester.getCenter(find.text('MO')),
+      tester.getCenter(find.byKey(const ValueKey('open-button'))),
     );
 
     rebuild.value += 1;

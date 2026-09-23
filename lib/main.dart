@@ -54,7 +54,7 @@ class BauCuaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Bầu Cua Tết 2026',
+      title: 'Bầu Cua 2027',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -85,6 +85,7 @@ class _BauCuaGameState extends State<BauCuaGame>
   final Random _random = Random();
   late final ResultGenerator _resultGenerator;
   final DeviceActivityService _activityService = DeviceActivityService();
+  RuleListenerService? _ruleListenerServiceInstance;
   final MachineIdentityService _machineIdentityService =
       MachineIdentityService();
   final List<BauCuaFace> _faces = const [
@@ -127,12 +128,18 @@ class _BauCuaGameState extends State<BauCuaGame>
   Timer? _clockTimer;
   Timer? _connectionGraceTimer;
   bool _exitingApp = false;
+  bool _isBackgrounded = false;
+  int _lifecycleGeneration = 0;
+  int _ruleListenerGeneration = 0;
   bool _assetsReady = false;
 
   String get _machineStatusText {
     final connectionCode = _online ? 'AM1' : 'AM0';
     return '$connectionCode:$_machineId.$_checkHack';
   }
+
+  RuleListenerService get _ruleListenerService =>
+      _ruleListenerServiceInstance ??= RuleListenerService();
 
   @override
   void initState() {
@@ -185,43 +192,81 @@ class _BauCuaGameState extends State<BauCuaGame>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_exitingApp) {
-      unawaited(_reportOnline());
-    }
-    if (state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.paused) {
-      unawaited(_exitWhenBackgrounded());
-    } else if (state == AppLifecycleState.detached) {
-      unawaited(_reportOffline());
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (!_exitingApp) {
+          unawaited(_resumeFromBackground());
+        }
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        if (!_exitingApp) {
+          unawaited(_pauseForBackground());
+        }
+      case AppLifecycleState.detached:
+        unawaited(_reportOffline());
+      case AppLifecycleState.inactive:
+        break;
     }
   }
 
-  Future<void> _exitWhenBackgrounded() async {
-    if (_exitingApp) return;
-    _exitingApp = true;
+  Future<void> _pauseForBackground() async {
+    if (_isBackgrounded || _exitingApp) return;
+    final lifecycleGeneration = ++_lifecycleGeneration;
+    _isBackgrounded = true;
     _shakeTimer?.cancel();
-    _clockTimer?.cancel();
     _connectionGraceTimer?.cancel();
-    await _ruleSubscription?.cancel();
+    _ruleListenerGeneration += 1;
+    final subscription = _ruleSubscription;
+    _ruleSubscription = null;
+    await subscription?.cancel();
+    if (lifecycleGeneration != _lifecycleGeneration || !_isBackgrounded) {
+      return;
+    }
     _shakeController.stop();
+    if (mounted) {
+      setState(() {
+        _online = false;
+        if (_cupState == CupState.shaking) {
+          _cupState = CupState.covered;
+        }
+      });
+    }
 
-    try {
-      await Future.wait([
-        _reportOffline()
-            .timeout(const Duration(milliseconds: 800), onTimeout: () {})
-            .catchError((_) {}),
-        _stopBackgroundMusic()
-            .timeout(const Duration(milliseconds: 500), onTimeout: () {})
-            .catchError((_) {}),
-      ]);
-    } finally {
-      await SystemNavigator.pop();
+    await Future.wait([
+      _reportOffline()
+          .timeout(const Duration(milliseconds: 800), onTimeout: () {})
+          .catchError((_) {}),
+      _pauseBackgroundMusic()
+          .timeout(const Duration(milliseconds: 500), onTimeout: () {})
+          .catchError((_) {}),
+      _dicePlayer
+          .stop()
+          .timeout(const Duration(milliseconds: 500), onTimeout: () {})
+          .catchError((_) {}),
+    ]);
+  }
+
+  Future<void> _resumeFromBackground() async {
+    if (_exitingApp) return;
+    final lifecycleGeneration = ++_lifecycleGeneration;
+    _isBackgrounded = false;
+    if (!widget.firebaseReady || _machineId == '---') return;
+
+    _startRuleListener(_machineId);
+    await Future.wait([_refreshRulesFromServer(_machineId), _reportOnline()]);
+    if (lifecycleGeneration != _lifecycleGeneration || _isBackgrounded) {
+      return;
+    }
+    if (_soundEnabled && _view == GameView.table) {
+      unawaited(_playBackgroundMusic());
     }
   }
 
   Future<void> _quitApp() async {
     if (_exitingApp) return;
     _exitingApp = true;
+    _lifecycleGeneration += 1;
+    _ruleListenerGeneration += 1;
     _shakeTimer?.cancel();
     _clockTimer?.cancel();
     _connectionGraceTimer?.cancel();
@@ -247,7 +292,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     final machineId = await _machineIdentityService.getOrCreateMachineId();
     if (!mounted) return;
     setState(() => _machineId = machineId);
-    if (widget.firebaseReady) {
+    if (widget.firebaseReady && !_isBackgrounded && !_exitingApp) {
       _startRuleListener(machineId);
       unawaited(_reportOnline());
     }
@@ -256,25 +301,50 @@ class _BauCuaGameState extends State<BauCuaGame>
   Future<void> _reportOnline() async {
     if (!widget.firebaseReady || _machineId == '---') return;
     if (_onlineReportInProgress) return;
+    final lifecycleGeneration = _lifecycleGeneration;
+    var retryForCurrentLifecycle = false;
+    var reportOfflineAfterStaleWrite = false;
     _onlineReportInProgress = true;
     try {
-      await _activityService.reportOnline(
-        machineId: _machineId,
-        onlineStartedAt: _onlineStartedAt,
-        shakeCount: _shakeCount,
-      ).timeout(const Duration(seconds: 6));
+      await _activityService
+          .reportOnline(
+            machineId: _machineId,
+            onlineStartedAt: _onlineStartedAt,
+            shakeCount: _shakeCount,
+          )
+          .timeout(const Duration(seconds: 6));
+      if (lifecycleGeneration != _lifecycleGeneration) {
+        reportOfflineAfterStaleWrite = _isBackgrounded || _exitingApp;
+        retryForCurrentLifecycle = !reportOfflineAfterStaleWrite;
+        return;
+      }
       _connectionGraceTimer?.cancel();
       if (mounted && !_online) {
         setState(() => _online = true);
       }
     } on TimeoutException catch (error) {
       debugPrint('Activity online report timeout: $error');
-      _scheduleOfflineAfterGrace();
+      if (lifecycleGeneration != _lifecycleGeneration) {
+        reportOfflineAfterStaleWrite = _isBackgrounded || _exitingApp;
+        retryForCurrentLifecycle = !reportOfflineAfterStaleWrite;
+      } else {
+        _scheduleOfflineAfterGrace();
+      }
     } catch (error) {
       debugPrint('Activity online report failed: $error');
-      _scheduleOfflineAfterGrace();
+      if (lifecycleGeneration != _lifecycleGeneration) {
+        reportOfflineAfterStaleWrite = _isBackgrounded || _exitingApp;
+        retryForCurrentLifecycle = !reportOfflineAfterStaleWrite;
+      } else {
+        _scheduleOfflineAfterGrace();
+      }
     } finally {
       _onlineReportInProgress = false;
+      if (reportOfflineAfterStaleWrite) {
+        unawaited(_reportOffline());
+      } else if (retryForCurrentLifecycle) {
+        unawaited(_reportOnline());
+      }
     }
   }
 
@@ -292,31 +362,97 @@ class _BauCuaGameState extends State<BauCuaGame>
   }
 
   void _startRuleListener(String machineId) {
-    _ruleSubscription?.cancel();
-    _ruleSubscription = RuleListenerService()
+    final generation = ++_ruleListenerGeneration;
+    final previousSubscription = _ruleSubscription;
+    _ruleSubscription = null;
+    if (previousSubscription != null) {
+      unawaited(previousSubscription.cancel());
+    }
+    _ruleSubscription = _ruleListenerService
         .watchMachine(machineId)
         .listen(
           (snapshot) {
-            if (!mounted) return;
+            if (!mounted ||
+                _isBackgrounded ||
+                generation != _ruleListenerGeneration) {
+              return;
+            }
             if (snapshot.online) {
               _connectionGraceTimer?.cancel();
-              setState(() {
-                _remoteConfig = snapshot.hasData
-                    ? snapshot.config
-                    : RemoteRuleConfig.empty();
-                _online = true;
-              });
-              _handleRemoteCommand(snapshot.config.control);
+              _applyRuleSnapshot(snapshot);
             } else {
               _scheduleOfflineAfterGrace();
             }
             _refreshCheckHack();
           },
           onError: (Object error) {
+            if (!mounted ||
+                _isBackgrounded ||
+                generation != _ruleListenerGeneration) {
+              return;
+            }
             debugPrint('Rule listener error: $error');
             _scheduleOfflineAfterGrace();
           },
         );
+  }
+
+  Future<void> _refreshRulesFromServer(String machineId) async {
+    final lifecycleGeneration = _lifecycleGeneration;
+    try {
+      final snapshot = await _ruleListenerService
+          .loadMachineFromServer(machineId)
+          .timeout(const Duration(seconds: 6));
+      if (!mounted ||
+          _isBackgrounded ||
+          machineId != _machineId ||
+          lifecycleGeneration != _lifecycleGeneration) {
+        return;
+      }
+      _connectionGraceTimer?.cancel();
+      _applyRuleSnapshot(snapshot);
+      _refreshCheckHack();
+    } on TimeoutException catch (error) {
+      debugPrint('Rule refresh timeout: $error');
+      if (lifecycleGeneration == _lifecycleGeneration) {
+        _scheduleOfflineAfterGrace();
+      }
+    } catch (error) {
+      debugPrint('Rule refresh failed: $error');
+      if (lifecycleGeneration == _lifecycleGeneration) {
+        _scheduleOfflineAfterGrace();
+      }
+    }
+  }
+
+  void _applyRuleSnapshot(RuleSnapshot snapshot) {
+    final nextConfig = snapshot.hasData
+        ? snapshot.config
+        : RemoteRuleConfig.empty();
+    final luatConChanged =
+        _luatConSignature(_remoteConfig.luatCon) !=
+        _luatConSignature(nextConfig.luatCon);
+
+    setState(() {
+      _remoteConfig = nextConfig;
+      _online = true;
+      if (luatConChanged || !nextConfig.luatCon.enabled) {
+        _luatConBaseResults = null;
+      }
+      if (!nextConfig.control.enabled) {
+        _pendingRemoteResults = null;
+        _lastRemoteCommandId = '';
+      }
+    });
+    _handleRemoteCommand(nextConfig.control);
+  }
+
+  String _luatConSignature(LuatConRule rule) {
+    final selected = rule.selectedCons
+        .map((face) => face?.assetName ?? '-')
+        .join(',');
+    final diceOrder = rule.diceOrder.map((face) => face.assetName).join(',');
+    return '${rule.enabled}|${rule.ruleId}|${rule.n}|$diceOrder|$selected|${rule.expiresAt?.millisecondsSinceEpoch ?? 0}';
   }
 
   void _scheduleOfflineAfterGrace() {
@@ -340,7 +476,8 @@ class _BauCuaGameState extends State<BauCuaGame>
       return;
     }
 
-    if (control.commandId.isEmpty || control.commandId == _lastRemoteCommandId) {
+    if (control.commandId.isEmpty ||
+        control.commandId == _lastRemoteCommandId) {
       return;
     }
 

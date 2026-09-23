@@ -8,6 +8,27 @@ import 'package:baucua2027_ios_game/services/result_generator.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('missing Firebase law fields disable both online laws', () {
+    final config = RemoteRuleConfig.fromMap({
+      'activity': {'online': true},
+      'control': {'enabled': false},
+    });
+
+    expect(config.luatCon.enabled, isFalse);
+    expect(config.luatCai.enabled, isFalse);
+  });
+
+  test('expired Firebase laws are disabled without another snapshot', () {
+    final expiredAt = DateTime.now().subtract(const Duration(seconds: 1));
+    final config = RemoteRuleConfig.fromMap({
+      'luatCon': {'enabled': true, 'expiresAt': expiredAt},
+      'luatCai': {'enabled': true, 'expiresAt': expiredAt},
+    });
+
+    expect(config.luatCon.enabled, isFalse);
+    expect(config.luatCai.enabled, isFalse);
+  });
+
   test('luat con roll uses previous result to force next target', () {
     const diceOrder = [
       BauCuaFace.bau,

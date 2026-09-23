@@ -30,6 +30,14 @@ class RuleListenerService {
         .snapshots(includeMetadataChanges: true)
         .map(_snapshotFromDocument);
   }
+
+  Future<RuleSnapshot> loadMachineFromServer(String machineId) async {
+    final snapshot = await _firestore
+        .collection('machines')
+        .doc(machineId)
+        .get(const GetOptions(source: Source.server));
+    return _snapshotFromDocument(snapshot);
+  }
 }
 
 RuleSnapshot _snapshotFromDocument(
