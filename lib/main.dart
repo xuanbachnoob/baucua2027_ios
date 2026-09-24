@@ -125,6 +125,7 @@ class _BauCuaGameState extends State<BauCuaGame>
   int _shakeCount = 0;
   String _lastRemoteCommandId = '';
   List<BauCuaFace>? _pendingRemoteResults;
+  bool _openInProgress = false;
   Timer? _shakeTimer;
   Timer? _clockTimer;
   Timer? _connectionGraceTimer;
@@ -483,8 +484,7 @@ class _BauCuaGameState extends State<BauCuaGame>
       return;
     }
 
-    if (control.commandId.isEmpty ||
-        control.commandId == _lastRemoteCommandId) {
+    if (!_isNewerRemoteCommand(control.commandId)) {
       return;
     }
 
@@ -495,6 +495,15 @@ class _BauCuaGameState extends State<BauCuaGame>
 
     _lastRemoteCommandId = control.commandId;
     setState(() => _pendingRemoteResults = results);
+  }
+
+  bool _isNewerRemoteCommand(String commandId) {
+    if (commandId.isEmpty || commandId == _lastRemoteCommandId) {
+      return false;
+    }
+    final nextId = int.tryParse(commandId);
+    final previousId = int.tryParse(_lastRemoteCommandId);
+    return nextId == null || previousId == null || nextId > previousId;
   }
 
   List<BauCuaFace>? _resultsFromRemoteCommand(RemoteControlConfig control) {
@@ -672,7 +681,6 @@ class _BauCuaGameState extends State<BauCuaGame>
     setState(() {
       _cupState = CupState.shaking;
       _shakeCount += 1;
-      _pendingRemoteResults = null;
     });
     unawaited(_reportOnline());
 
@@ -693,37 +701,62 @@ class _BauCuaGameState extends State<BauCuaGame>
     });
   }
 
-  void _openCup(CupOpenZone zone) {
-    if (_cupState != CupState.covered) return;
-    final remoteResults = _pendingRemoteResults;
-    final previousResults = _luatConBaseResults == null
-        ? null
-        : List<BauCuaFace>.from(_luatConBaseResults!);
-    final candidate =
-        remoteResults ??
-        _resultGenerator.roll(
-          faces: _faces,
-          remoteConfig: _remoteConfig,
-          online: _online,
-          machineId: _machineId == '---' ? '000' : _machineId,
-          now: OfflineLawGenerator.vietnamNow(),
-          openZone: zone,
-          previousResults: previousResults,
-        );
-    final results = _enforceLuatCai(
-      candidate,
-      zone,
-      previousResults: previousResults,
-    );
-    setState(() {
-      _cupState = CupState.opened;
-      _results = results;
-      _shownResults = List<BauCuaFace>.from(_results);
-      _luatConBaseResults = _canUseAsLuatConBase(_results)
-          ? List<BauCuaFace>.from(_results)
-          : null;
-      _pendingRemoteResults = null;
-    });
+  Future<void> _openCup(CupOpenZone zone) async {
+    if (_cupState != CupState.covered || _openInProgress) return;
+    _openInProgress = true;
+    try {
+      if (widget.firebaseReady && !_isBackgrounded && _machineId != '---') {
+        try {
+          final snapshot = await _ruleListenerService
+              .loadMachineFromServer(_machineId)
+              .timeout(const Duration(seconds: 2));
+          if (!mounted || _isBackgrounded || _cupState != CupState.covered) {
+            return;
+          }
+          _applyRuleSnapshot(snapshot);
+          _refreshCheckHack();
+        } on TimeoutException catch (error) {
+          debugPrint('Remote refresh before opening timed out: $error');
+        } catch (error) {
+          debugPrint('Remote refresh before opening failed: $error');
+        }
+      }
+
+      if (!mounted || _isBackgrounded || _cupState != CupState.covered) {
+        return;
+      }
+      final remoteResults = _pendingRemoteResults;
+      final previousResults = _luatConBaseResults == null
+          ? null
+          : List<BauCuaFace>.from(_luatConBaseResults!);
+      final candidate =
+          remoteResults ??
+          _resultGenerator.roll(
+            faces: _faces,
+            remoteConfig: _remoteConfig,
+            online: _online,
+            machineId: _machineId == '---' ? '000' : _machineId,
+            now: OfflineLawGenerator.vietnamNow(),
+            openZone: zone,
+            previousResults: previousResults,
+          );
+      final results = _enforceLuatCai(
+        candidate,
+        zone,
+        previousResults: previousResults,
+      );
+      setState(() {
+        _cupState = CupState.opened;
+        _results = results;
+        _shownResults = List<BauCuaFace>.from(_results);
+        _luatConBaseResults = _canUseAsLuatConBase(_results)
+            ? List<BauCuaFace>.from(_results)
+            : null;
+        _pendingRemoteResults = null;
+      });
+    } finally {
+      _openInProgress = false;
+    }
   }
 
   List<BauCuaFace> _enforceLuatCai(
