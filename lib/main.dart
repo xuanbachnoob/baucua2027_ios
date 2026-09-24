@@ -707,6 +707,15 @@ class _BauCuaGameState extends State<BauCuaGame>
     try {
       if (widget.firebaseReady && !_isBackgrounded && _machineId != '---') {
         try {
+          // On iOS, a remote write started just before Open can still be in
+          // flight. Give Firestore a brief commit window before the
+          // authoritative server read so the command belongs to this round.
+          if (io.Platform.isIOS && _remoteConfig.control.enabled) {
+            await Future<void>.delayed(const Duration(milliseconds: 700));
+          }
+          if (!mounted || _isBackgrounded || _cupState != CupState.covered) {
+            return;
+          }
           final snapshot = await _ruleListenerService
               .loadMachineFromServer(_machineId)
               .timeout(const Duration(seconds: 2));
