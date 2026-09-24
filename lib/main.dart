@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'firebase_options.dart';
 import 'models/bau_cua_face.dart';
@@ -183,6 +184,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     _connectionGraceTimer?.cancel();
     _ruleSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(WakelockPlus.disable());
     unawaited(_reportOffline());
     _shakeController.dispose();
     unawaited(_disposeMusicPlayer());
@@ -195,11 +197,15 @@ class _BauCuaGameState extends State<BauCuaGame>
     switch (state) {
       case AppLifecycleState.resumed:
         if (!_exitingApp) {
+          if (_view == GameView.table) {
+            unawaited(WakelockPlus.enable());
+          }
           unawaited(_resumeFromBackground());
         }
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
         if (!_exitingApp) {
+          unawaited(WakelockPlus.disable());
           unawaited(_pauseForBackground());
         }
       case AppLifecycleState.detached:
@@ -272,6 +278,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     _connectionGraceTimer?.cancel();
     await _ruleSubscription?.cancel();
     _shakeController.stop();
+    await WakelockPlus.disable();
 
     await Future.wait([
       _reportOffline()
@@ -626,6 +633,7 @@ class _BauCuaGameState extends State<BauCuaGame>
   }
 
   void _startGame() {
+    unawaited(WakelockPlus.enable());
     unawaited(_playBackgroundMusic());
     setState(() {
       _view = GameView.table;
@@ -640,6 +648,7 @@ class _BauCuaGameState extends State<BauCuaGame>
     _shakeTimer?.cancel();
     _shakeController.stop();
     unawaited(_stopBackgroundMusic());
+    unawaited(WakelockPlus.disable());
     setState(() {
       _view = GameView.lobby;
       _cupState = CupState.opened;
