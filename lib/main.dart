@@ -488,16 +488,12 @@ class _BauCuaGameState extends State<BauCuaGame>
       return;
     }
 
-    _lastRemoteCommandId = control.commandId;
-    if (_cupState == CupState.opened) {
-      return;
-    }
-
     final results = _resultsFromRemoteCommand(control);
     if (results == null) {
       return;
     }
 
+    _lastRemoteCommandId = control.commandId;
     setState(() => _pendingRemoteResults = results);
   }
 
